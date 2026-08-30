@@ -1,4 +1,4 @@
-package com.example.timer.ui
+package com.jkb016.timer.ui
 
 import android.app.Application
 import android.content.ComponentName
@@ -8,11 +8,11 @@ import android.content.ServiceConnection
 import android.os.IBinder
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.timer.data.ActiveTimerState
-import com.example.timer.data.TimerHistoryItem
-import com.example.timer.data.TimerRepository
-import com.example.timer.data.TimerStatus
-import com.example.timer.service.TimerForegroundService
+import com.jkb016.timer.data.ActiveTimerState
+import com.jkb016.timer.data.TimerHistoryItem
+import com.jkb016.timer.data.TimerRepository
+import com.jkb016.timer.data.TimerStatus
+import com.jkb016.timer.service.TimerForegroundService
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -81,9 +81,13 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun bindTimerService() {
-        val context = getApplication<Application>().applicationContext
-        val intent = Intent(context, TimerForegroundService::class.java)
-        context.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+        try {
+            val context = getApplication<Application>().applicationContext
+            val intent = Intent(context, TimerForegroundService::class.java)
+            context.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+        } catch (e: Exception) {
+            // Safe fallback
+        }
     }
 
     fun loadHistory() {

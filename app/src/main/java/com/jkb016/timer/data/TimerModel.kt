@@ -1,4 +1,4 @@
-package com.example.timer.data
+package com.jkb016.timer.data
 
 import java.util.UUID
 

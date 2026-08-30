@@ -1,4 +1,4 @@
-package com.example.timer.ui.theme
+package com.jkb016.timer.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme

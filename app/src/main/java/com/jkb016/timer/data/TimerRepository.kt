@@ -1,4 +1,4 @@
-package com.example.timer.data
+package com.jkb016.timer.data
 
 import android.content.Context
 import android.content.SharedPreferences
@@ -23,9 +23,19 @@ class TimerRepository(context: Context) {
         return try {
             val type = object : TypeToken<List<TimerHistoryItem>>() {}.type
             val parsed: List<TimerHistoryItem> = gson.fromJson(json, type) ?: emptyList()
-            deduplicateList(parsed).sortedBy { it.totalSeconds }
+            val sanitized = parsed.mapNotNull { item ->
+                if (item != null && item.totalSeconds > 0) {
+                    TimerHistoryItem(
+                        id = item.id ?: java.util.UUID.randomUUID().toString(),
+                        totalSeconds = item.totalSeconds,
+                        label = item.label ?: "",
+                        timestamp = if (item.timestamp > 0) item.timestamp else System.currentTimeMillis()
+                    )
+                } else null
+            }
+            deduplicateList(sanitized).sortedBy { it.totalSeconds }
         } catch (e: Exception) {
-            emptyList()
+            defaultPresets()
         }
     }
 
@@ -109,10 +119,29 @@ class TimerRepository(context: Context) {
             val list: List<ActiveTimerState> = gson.fromJson(json, type) ?: emptyList()
             val now = System.currentTimeMillis()
             var modified = false
-            val updated = list.map { timer ->
+            val sanitized = list.mapNotNull { timer ->
+                if (timer != null) {
+                    val safeId = timer.id ?: java.util.UUID.randomUUID().toString()
+                    val safeStatus = timer.status ?: TimerStatus.IDLE
+                    val safeLabel = timer.label ?: ""
+                    val originalSec = if (timer.originalSeconds > 0) timer.originalSeconds else (timer.currentTotalSeconds).coerceAtLeast(1L)
+                    val currentTotal = if (timer.currentTotalSeconds > 0) timer.currentTotalSeconds else originalSec
+                    ActiveTimerState(
+                        id = safeId,
+                        originalSeconds = originalSec,
+                        currentTotalSeconds = currentTotal,
+                        remainingMillis = timer.remainingMillis,
+                        status = safeStatus,
+                        label = safeLabel,
+                        createdAt = if (timer.createdAt > 0) timer.createdAt else now,
+                        endTimeMillis = timer.endTimeMillis
+                    )
+                } else null
+            }
+            val updated = sanitized.map { timer ->
                 if (timer.status == TimerStatus.RUNNING) {
                     val rem = timer.endTimeMillis - now
-                    if (rem > 0) {
+                    if (rem > 500L) {
                         modified = true
                         timer.copy(remainingMillis = rem)
                     } else {

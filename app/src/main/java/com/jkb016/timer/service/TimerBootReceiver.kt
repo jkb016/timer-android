@@ -1,11 +1,11 @@
-package com.example.timer.service
+package com.jkb016.timer.service
 
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import com.example.timer.data.TimerRepository
-import com.example.timer.data.TimerStatus
+import com.jkb016.timer.data.TimerRepository
+import com.jkb016.timer.data.TimerStatus
 
 class TimerBootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {

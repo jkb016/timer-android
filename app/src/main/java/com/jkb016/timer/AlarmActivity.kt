@@ -1,4 +1,4 @@
-package com.example.timer
+package com.jkb016.timer
 
 import android.app.KeyguardManager
 import android.content.Context
@@ -51,10 +51,10 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import android.content.BroadcastReceiver
 import android.content.IntentFilter
-import com.example.timer.data.TimerRepository
-import com.example.timer.data.TimerStatus
-import com.example.timer.service.TimerForegroundService
-import com.example.timer.ui.theme.TimerTheme
+import com.jkb016.timer.data.TimerRepository
+import com.jkb016.timer.data.TimerStatus
+import com.jkb016.timer.service.TimerForegroundService
+import com.jkb016.timer.ui.theme.TimerTheme
 
 class AlarmActivity : ComponentActivity() {
 
@@ -79,18 +79,34 @@ class AlarmActivity : ComponentActivity() {
                 AlarmScreen(
                     timerName = timerName,
                     onStop = {
-                        val serviceIntent = Intent(this, TimerForegroundService::class.java).apply {
+                        val serviceIntent = Intent(this@AlarmActivity, TimerForegroundService::class.java).apply {
                             action = TimerForegroundService.ACTION_STOP_TIMER
                         }
-                        startService(serviceIntent)
+                        try {
+                            androidx.core.content.ContextCompat.startForegroundService(this@AlarmActivity, serviceIntent)
+                        } catch (e: Exception) {
+                            try {
+                                startService(serviceIntent)
+                            } catch (e2: Exception) {
+                                // Ignore
+                            }
+                        }
                         finish()
                     },
                     onAddExtraTime = { secondsToAdd ->
-                        val serviceIntent = Intent(this, TimerForegroundService::class.java).apply {
+                        val serviceIntent = Intent(this@AlarmActivity, TimerForegroundService::class.java).apply {
                             action = TimerForegroundService.ACTION_ADD_TIME
                             putExtra(TimerForegroundService.EXTRA_ADD_SECONDS, secondsToAdd)
                         }
-                        startService(serviceIntent)
+                        try {
+                            androidx.core.content.ContextCompat.startForegroundService(this@AlarmActivity, serviceIntent)
+                        } catch (e: Exception) {
+                            try {
+                                startService(serviceIntent)
+                            } catch (e2: Exception) {
+                                // Ignore
+                            }
+                        }
                         finish()
                     }
                 )
@@ -109,12 +125,6 @@ class AlarmActivity : ComponentActivity() {
         super.onResume()
         turnScreenOnAndShowWhenLocked()
         hideSystemUI()
-
-        val repository = TimerRepository(applicationContext)
-        val finishedTimers = repository.getActiveTimers().filter { it.status == TimerStatus.FINISHED }
-        if (finishedTimers.isEmpty()) {
-            finish()
-        }
     }
 
     override fun onAttachedToWindow() {
@@ -163,7 +173,9 @@ class AlarmActivity : ComponentActivity() {
         window.addFlags(
             WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
             WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+            WindowManager.LayoutParams.FLAG_ALLOW_LOCK_WHILE_SCREEN_ON or
+            WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
         )
     }
 

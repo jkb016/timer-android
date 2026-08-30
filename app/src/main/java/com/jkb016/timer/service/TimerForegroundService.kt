@@ -1,4 +1,4 @@
-package com.example.timer.service
+package com.jkb016.timer.service
 
 import android.app.AlarmManager
 import android.app.Notification
@@ -21,10 +21,10 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import androidx.core.app.NotificationCompat
-import com.example.timer.MainActivity
-import com.example.timer.data.ActiveTimerState
-import com.example.timer.data.TimerRepository
-import com.example.timer.data.TimerStatus
+import com.jkb016.timer.MainActivity
+import com.jkb016.timer.data.ActiveTimerState
+import com.jkb016.timer.data.TimerRepository
+import com.jkb016.timer.data.TimerStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -58,9 +58,27 @@ class TimerForegroundService : Service() {
         super.onCreate()
         createNotificationChannel()
         setupMedia()
+        val initialNotification = createNotification("Timer", "Running...", isCountingDown = false, isAlarm = false)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    initialNotification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, initialNotification)
+            }
+        } catch (e: Exception) {
+            // Ignore
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_ALARM_TRIGGER) {
+            handleAlarmTriggerAction()
+            return START_STICKY
+        }
         if (intent?.action == ACTION_STOP_TIMER) {
             handleStopAction()
             return START_STICKY
@@ -72,6 +90,22 @@ class TimerForegroundService : Service() {
         }
         refreshServiceState()
         return START_STICKY
+    }
+
+    private fun handleAlarmTriggerAction() {
+        val repository = TimerRepository(applicationContext)
+        val activeTimers = repository.getActiveTimers()
+        val runningTimers = activeTimers.filter { it.status == TimerStatus.RUNNING }.sortedBy { it.endTimeMillis }
+        val now = System.currentTimeMillis()
+
+        val updated = activeTimers.map { timer ->
+            if (timer.status == TimerStatus.RUNNING && (timer.endTimeMillis <= now + 2000L || timer.id == runningTimers.firstOrNull()?.id)) {
+                timer.copy(remainingMillis = 0L, status = TimerStatus.FINISHED)
+            } else timer
+        }
+        repository.saveActiveTimers(updated)
+        stateChangeListener?.invoke()
+        refreshServiceState()
     }
 
     private fun handleStopAction() {
@@ -136,24 +170,28 @@ class TimerForegroundService : Service() {
 
         when {
             finishedTimers.isNotEmpty() -> {
-                val firstFinished = finishedTimers.first()
-                val labelStr = if (firstFinished.label.isNotBlank()) firstFinished.label else ActiveTimerState.formatSeconds(firstFinished.originalSeconds)
-                val title = if (finishedTimers.size == 1) "Timer Finished! ($labelStr)" else "${finishedTimers.size} Timers Finished!"
-                val content = if (runningTimers.isNotEmpty()) {
-                    "Time's up! (${runningTimers.size} still running)"
-                } else {
-                    "Time's up!"
-                }
-
-                startForegroundNotification(title, content, endTimeMillis = 0L, isCountingDown = false, isAlarm = true)
                 triggerAlarm()
 
                 if (runningTimers.isNotEmpty()) {
                     val nextTimer = runningTimers.first()
                     scheduleAlarmManager(nextTimer.endTimeMillis)
                     startTickerLoop()
+
+                    val labelStr = if (nextTimer.label.isNotBlank()) nextTimer.label else ActiveTimerState.formatSeconds(nextTimer.originalSeconds)
+                    val title = if (runningTimers.size == 1) "$labelStr Timer" else "${runningTimers.size} Timers Running"
+                    val now = System.currentTimeMillis()
+                    val remMillis = (nextTimer.endTimeMillis - now).coerceAtLeast(0L)
+                    val content = ActiveTimerState.formatSeconds((remMillis + 999L) / 1000L)
+                    startForegroundNotification(title, content, endTimeMillis = nextTimer.endTimeMillis, isCountingDown = true, isAlarm = false)
                 } else {
                     stopTickerLoop()
+                    try {
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                        manager.cancel(NOTIFICATION_ID)
+                    } catch (e: Exception) {
+                        // Ignore
+                    }
                 }
             }
             runningTimers.isNotEmpty() -> {
@@ -173,7 +211,13 @@ class TimerForegroundService : Service() {
                 stopAlarm()
                 stopTickerLoop()
                 cancelAlarmManager()
-                stopForeground(STOP_FOREGROUND_REMOVE)
+                try {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                    manager.cancel(NOTIFICATION_ID)
+                } catch (e: Exception) {
+                    // Ignore
+                }
                 stopSelf()
             }
         }
@@ -214,28 +258,32 @@ class TimerForegroundService : Service() {
     private fun scheduleAlarmManager(triggerAtMillis: Long) {
         if (triggerAtMillis <= System.currentTimeMillis()) return
         val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        val intent = Intent(this, TimerForegroundService::class.java).apply {
+        val intent = Intent(this, TimerAlarmReceiver::class.java).apply {
             action = ACTION_ALARM_TRIGGER
         }
-        val pendingIntent = PendingIntent.getService(
+        val pendingIntent = PendingIntent.getBroadcast(
             this,
             1002,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val showIntent = Intent(this, com.example.timer.AlarmActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        val showIntent = Intent(this, com.jkb016.timer.AlarmActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
         }
-        val options = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        val showOptions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             android.app.ActivityOptions.makeBasic().apply {
-                setPendingIntentBackgroundActivityStartMode(android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
+                setPendingIntentCreatorBackgroundActivityStartMode(android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
             }.toBundle()
         } else null
+
         val showPendingIntent = PendingIntent.getActivity(
             this, 1005, showIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            options
+            showOptions
         )
 
         try {
@@ -256,10 +304,10 @@ class TimerForegroundService : Service() {
 
     private fun cancelAlarmManager() {
         val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        val intent = Intent(this, TimerForegroundService::class.java).apply {
+        val intent = Intent(this, TimerAlarmReceiver::class.java).apply {
             action = ACTION_ALARM_TRIGGER
         }
-        val pendingIntent = PendingIntent.getService(
+        val pendingIntent = PendingIntent.getBroadcast(
             this,
             1002,
             intent,
@@ -280,7 +328,7 @@ class TimerForegroundService : Service() {
 
     private fun playAlarmSound() {
         if (mediaPlayer?.isPlaying == true || ringtone?.isPlaying == true) return
-        val soundUri = android.net.Uri.parse("android.resource://" + packageName + "/" + com.example.timer.R.raw.sound)
+        val soundUri = android.net.Uri.parse("android.resource://" + packageName + "/" + com.jkb016.timer.R.raw.sound)
 
         try {
             mediaPlayer = MediaPlayer().apply {
@@ -302,7 +350,7 @@ class TimerForegroundService : Service() {
             }
         } catch (e: Exception) {
             try {
-                mediaPlayer = MediaPlayer.create(applicationContext, com.example.timer.R.raw.sound)?.apply {
+                mediaPlayer = MediaPlayer.create(applicationContext, com.jkb016.timer.R.raw.sound)?.apply {
                     isLooping = true
                     start()
                 }
@@ -345,14 +393,18 @@ class TimerForegroundService : Service() {
         isAlarm: Boolean = false
     ) {
         val notification = createNotification(title, content, endTimeMillis, isCountingDown, isAlarm)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            // ForegroundServiceStartNotAllowedException or SecurityException
         }
     }
 
@@ -363,17 +415,20 @@ class TimerForegroundService : Service() {
         isCountingDown: Boolean = false,
         isAlarm: Boolean = false
     ) {
-        val notification = createNotification(title, content, endTimeMillis, isCountingDown, isAlarm)
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.notify(NOTIFICATION_ID, notification)
+        try {
+            val notification = createNotification(title, content, endTimeMillis, isCountingDown, isAlarm)
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.notify(NOTIFICATION_ID, notification)
+        } catch (e: Exception) {
+            // Ignore notification error
+        }
     }
 
     private fun acquireWakeLock() {
         if (wakeLock?.isHeld == true) return
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        @Suppress("DEPRECATION")
         wakeLock = powerManager.newWakeLock(
-            PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE,
+            PowerManager.PARTIAL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE,
             "TimerApp:AlarmWakeLock"
         ).apply {
             acquire(60 * 1000L)
@@ -401,33 +456,37 @@ class TimerForegroundService : Service() {
             finishedTimers.first().displayOriginalLabel
         } else "Timer"
 
+        val alarmIntent = Intent(this, com.jkb016.timer.AlarmActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+            putExtra(com.jkb016.timer.AlarmActivity.EXTRA_TIMER_NAME, firstName)
+        }
+        val creatorOptions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            android.app.ActivityOptions.makeBasic().apply {
+                setPendingIntentCreatorBackgroundActivityStartMode(android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
+            }.toBundle()
+        } else null
+
+        val pendingIntent = PendingIntent.getActivity(
+            this, 1004, alarmIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            creatorOptions
+        )
+        val senderOptions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            android.app.ActivityOptions.makeBasic().apply {
+                setPendingIntentBackgroundActivityStartMode(android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
+            }.toBundle()
+        } else null
+
         try {
-            val alarmIntent = Intent(this, com.example.timer.AlarmActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                        Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                        Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
-                putExtra(com.example.timer.AlarmActivity.EXTRA_TIMER_NAME, firstName)
-            }
-            val options = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                android.app.ActivityOptions.makeBasic().apply {
-                    setPendingIntentBackgroundActivityStartMode(android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
-                }.toBundle()
-            } else null
-            startActivity(alarmIntent, options)
+            pendingIntent.send(this, 0, null, null, null, null, senderOptions)
         } catch (e: Exception) {
             try {
-                val alarmIntent = Intent(this, com.example.timer.AlarmActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                    putExtra(com.example.timer.AlarmActivity.EXTRA_TIMER_NAME, firstName)
-                }
-                val pendingIntent = PendingIntent.getActivity(
-                    this, 1004, alarmIntent,
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-                pendingIntent.send()
+                startActivity(alarmIntent)
             } catch (e2: Exception) {
-                // Fallback
+                // Ignore
             }
         }
 
@@ -452,6 +511,12 @@ class TimerForegroundService : Service() {
             setPackage(packageName)
         }
         sendBroadcast(stopBroadcast)
+        try {
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.cancel(NOTIFICATION_ID)
+        } catch (e: Exception) {
+            // Ignore
+        }
     }
 
     fun stopForegroundService() {
@@ -469,6 +534,7 @@ class TimerForegroundService : Service() {
         isCountingDown: Boolean = false,
         isAlarm: Boolean = false
     ): Notification {
+        val channelId = if (isAlarm) CHANNEL_ALARM_ID else CHANNEL_ID
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -477,27 +543,42 @@ class TimerForegroundService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val stopIntent = Intent(this, TimerForegroundService::class.java).apply {
-            action = ACTION_STOP_TIMER
+        val alarmActivityIntent = Intent(this, com.jkb016.timer.AlarmActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+            putExtra(com.jkb016.timer.AlarmActivity.EXTRA_TIMER_NAME, title)
         }
-        val stopPendingIntent = PendingIntent.getService(
-            this, 1003, stopIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        val fullScreenOptions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            android.app.ActivityOptions.makeBasic().apply {
+                setPendingIntentCreatorBackgroundActivityStartMode(android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
+            }.toBundle()
+        } else null
+
+        val fullScreenPendingIntent = PendingIntent.getActivity(
+            this, 1005, alarmActivityIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            fullScreenOptions
         )
 
-        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(this, channelId)
             .setContentTitle(title)
             .setContentText(content)
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-            .setContentIntent(pendingIntent)
+            .setContentIntent(if (isAlarm) fullScreenPendingIntent else pendingIntent)
             .setOngoing(true)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setOnlyAlertOnce(true)
+            .setOnlyAlertOnce(!isAlarm)
             .setUsesChronometer(false)
             .setShowWhen(false)
             .setSound(null)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPendingIntent)
+            .setPriority(if (isAlarm) NotificationCompat.PRIORITY_MAX else NotificationCompat.PRIORITY_LOW)
+            .setCategory(if (isAlarm) NotificationCompat.CATEGORY_ALARM else NotificationCompat.CATEGORY_SERVICE)
+
+        if (isAlarm) {
+            builder.setFullScreenIntent(fullScreenPendingIntent, true)
+        }
 
         return builder.build()
     }
@@ -538,13 +619,13 @@ class TimerForegroundService : Service() {
 
     companion object {
         const val EXTRA_RESTORE_ON_BOOT = "extra_restore_on_boot"
-        const val ACTION_ALARM_TRIGGER = "com.example.timer.ACTION_ALARM_TRIGGER"
-        const val ACTION_STOP_TIMER = "com.example.timer.ACTION_STOP_TIMER"
-        const val ACTION_ALARM_STOPPED = "com.example.timer.ACTION_ALARM_STOPPED"
-        const val ACTION_ADD_TIME = "com.example.timer.ACTION_ADD_TIME"
+        const val ACTION_ALARM_TRIGGER = "com.jkb016.timer.ACTION_ALARM_TRIGGER"
+        const val ACTION_STOP_TIMER = "com.jkb016.timer.ACTION_STOP_TIMER"
+        const val ACTION_ALARM_STOPPED = "com.jkb016.timer.ACTION_ALARM_STOPPED"
+        const val ACTION_ADD_TIME = "com.jkb016.timer.ACTION_ADD_TIME"
         const val EXTRA_ADD_SECONDS = "extra_add_seconds"
         private const val CHANNEL_ID = "timer_service_channel"
-        private const val CHANNEL_ALARM_ID = "timer_alarm_channel_v3"
+        private const val CHANNEL_ALARM_ID = "timer_alarm_channel_v5"
         private const val NOTIFICATION_ID = 1001
     }
 }

@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.timer"
+    namespace = "com.jkb016.timer"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.example.timer"
+        applicationId = "com.jkb016.timer"
         minSdk = 26
         targetSdk = 36
         versionCode = 1

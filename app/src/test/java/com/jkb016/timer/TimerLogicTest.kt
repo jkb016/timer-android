@@ -1,7 +1,7 @@
-package com.example.timer
+package com.jkb016.timer
 
-import com.example.timer.data.ActiveTimerState
-import com.example.timer.ui.TimerViewModel
+import com.jkb016.timer.data.ActiveTimerState
+import com.jkb016.timer.ui.TimerViewModel
 import org.junit.Assert.assertEquals
 import org.junit.Test
 

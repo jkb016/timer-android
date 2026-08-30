@@ -1,4 +1,4 @@
-package com.example.timer
+package com.jkb016.timer
 
 import android.Manifest
 import android.content.Context
@@ -15,9 +15,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
-import com.example.timer.ui.TimerScreen
-import com.example.timer.ui.TimerViewModel
-import com.example.timer.ui.theme.TimerTheme
+import com.jkb016.timer.ui.TimerScreen
+import com.jkb016.timer.ui.TimerViewModel
+import com.jkb016.timer.ui.theme.TimerTheme
 
 class MainActivity : ComponentActivity() {
 
@@ -72,19 +72,12 @@ class MainActivity : ComponentActivity() {
                     }
                     startActivity(intent)
                 } catch (e: Exception) {
-                    // Fallback
-                }
-            }
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (!android.provider.Settings.canDrawOverlays(this)) {
-                try {
-                    val intent = Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply {
-                        data = android.net.Uri.parse("package:$packageName")
+                    try {
+                        val fallbackIntent = Intent(android.provider.Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT)
+                        startActivity(fallbackIntent)
+                    } catch (e2: Exception) {
+                        // Ignore
                     }
-                    startActivity(intent)
-                } catch (e: Exception) {
-                    // Fallback
                 }
             }
         }

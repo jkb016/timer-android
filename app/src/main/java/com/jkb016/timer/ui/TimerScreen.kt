@@ -1,4 +1,4 @@
-package com.example.timer.ui
+package com.jkb016.timer.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Canvas
@@ -64,9 +64,9 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.timer.data.ActiveTimerState
-import com.example.timer.data.TimerHistoryItem
-import com.example.timer.data.TimerStatus
+import com.jkb016.timer.data.ActiveTimerState
+import com.jkb016.timer.data.TimerHistoryItem
+import com.jkb016.timer.data.TimerStatus
 
 import androidx.compose.foundation.border
 import androidx.compose.foundation.lazy.rememberLazyListState
