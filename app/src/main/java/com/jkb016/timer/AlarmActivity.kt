@@ -83,13 +83,9 @@ class AlarmActivity : ComponentActivity() {
                             action = TimerForegroundService.ACTION_STOP_TIMER
                         }
                         try {
-                            androidx.core.content.ContextCompat.startForegroundService(this@AlarmActivity, serviceIntent)
+                            startService(serviceIntent)
                         } catch (e: Exception) {
-                            try {
-                                startService(serviceIntent)
-                            } catch (e2: Exception) {
-                                // Ignore
-                            }
+                            // In background or stopped
                         }
                         finish()
                     },
@@ -99,13 +95,9 @@ class AlarmActivity : ComponentActivity() {
                             putExtra(TimerForegroundService.EXTRA_ADD_SECONDS, secondsToAdd)
                         }
                         try {
-                            androidx.core.content.ContextCompat.startForegroundService(this@AlarmActivity, serviceIntent)
+                            startService(serviceIntent)
                         } catch (e: Exception) {
-                            try {
-                                startService(serviceIntent)
-                            } catch (e2: Exception) {
-                                // Ignore
-                            }
+                            // In background or stopped
                         }
                         finish()
                     }

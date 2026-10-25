@@ -75,6 +75,10 @@ class TimerForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Android requires startForeground() to be actively called within seconds of startForegroundService().
+        // Always ensure a foreground notification is immediately posted.
+        ensureForegroundNotification()
+
         if (intent?.action == ACTION_ALARM_TRIGGER) {
             handleAlarmTriggerAction()
             return START_STICKY
@@ -90,6 +94,45 @@ class TimerForegroundService : Service() {
         }
         refreshServiceState()
         return START_STICKY
+    }
+
+    private fun ensureForegroundNotification() {
+        val repository = TimerRepository(applicationContext)
+        val activeTimers = repository.getActiveTimers()
+        val finishedTimers = activeTimers.filter { it.status == TimerStatus.FINISHED }
+        val runningTimers = activeTimers.filter { it.status == TimerStatus.RUNNING }.sortedBy { it.endTimeMillis }
+
+        when {
+            finishedTimers.isNotEmpty() -> {
+                val label = finishedTimers.first().displayOriginalLabel
+                startForegroundNotification(label, "Time's up!", isCountingDown = false, isAlarm = true)
+            }
+            runningTimers.isNotEmpty() -> {
+                val nextTimer = runningTimers.first()
+                val labelStr = if (nextTimer.label.isNotBlank()) nextTimer.label else ActiveTimerState.formatSeconds(nextTimer.originalSeconds)
+                val title = if (runningTimers.size == 1) "$labelStr Timer" else "${runningTimers.size} Timers Running"
+                val now = System.currentTimeMillis()
+                val remMillis = (nextTimer.endTimeMillis - now).coerceAtLeast(0L)
+                val content = ActiveTimerState.formatSeconds((remMillis + 999L) / 1000L)
+                startForegroundNotification(title, content, endTimeMillis = nextTimer.endTimeMillis, isCountingDown = true, isAlarm = false)
+            }
+            else -> {
+                val initialNotification = createNotification("Timer", "Running...", isCountingDown = false, isAlarm = false)
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                        startForeground(
+                            NOTIFICATION_ID,
+                            initialNotification,
+                            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                        )
+                    } else {
+                        startForeground(NOTIFICATION_ID, initialNotification)
+                    }
+                } catch (e: Exception) {
+                    // Ignore
+                }
+            }
+        }
     }
 
     private fun handleAlarmTriggerAction() {
@@ -172,26 +215,16 @@ class TimerForegroundService : Service() {
             finishedTimers.isNotEmpty() -> {
                 triggerAlarm()
 
+                val label = finishedTimers.first().displayOriginalLabel
                 if (runningTimers.isNotEmpty()) {
                     val nextTimer = runningTimers.first()
                     scheduleAlarmManager(nextTimer.endTimeMillis)
                     startTickerLoop()
 
-                    val labelStr = if (nextTimer.label.isNotBlank()) nextTimer.label else ActiveTimerState.formatSeconds(nextTimer.originalSeconds)
-                    val title = if (runningTimers.size == 1) "$labelStr Timer" else "${runningTimers.size} Timers Running"
-                    val now = System.currentTimeMillis()
-                    val remMillis = (nextTimer.endTimeMillis - now).coerceAtLeast(0L)
-                    val content = ActiveTimerState.formatSeconds((remMillis + 999L) / 1000L)
-                    startForegroundNotification(title, content, endTimeMillis = nextTimer.endTimeMillis, isCountingDown = true, isAlarm = false)
+                    startForegroundNotification(label, "Time's up!", endTimeMillis = nextTimer.endTimeMillis, isCountingDown = false, isAlarm = true)
                 } else {
                     stopTickerLoop()
-                    try {
-                        stopForeground(STOP_FOREGROUND_REMOVE)
-                        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                        manager.cancel(NOTIFICATION_ID)
-                    } catch (e: Exception) {
-                        // Ignore
-                    }
+                    startForegroundNotification(label, "Time's up!", isCountingDown = false, isAlarm = true)
                 }
             }
             runningTimers.isNotEmpty() -> {
@@ -562,18 +595,18 @@ class TimerForegroundService : Service() {
             fullScreenOptions
         )
 
-        val builder = NotificationCompat.Builder(this, channelId)
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(content)
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
             .setContentIntent(if (isAlarm) fullScreenPendingIntent else pendingIntent)
             .setOngoing(true)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setOnlyAlertOnce(!isAlarm)
+            .setOnlyAlertOnce(true)
             .setUsesChronometer(false)
             .setShowWhen(false)
             .setSound(null)
-            .setPriority(if (isAlarm) NotificationCompat.PRIORITY_MAX else NotificationCompat.PRIORITY_LOW)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(if (isAlarm) NotificationCompat.CATEGORY_ALARM else NotificationCompat.CATEGORY_SERVICE)
 
         if (isAlarm) {
@@ -594,20 +627,9 @@ class TimerForegroundService : Service() {
                 description = "Notification channel for active timers"
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
                 enableVibration(false)
-            }
-            manager.createNotificationChannel(lowChannel)
-
-            val alarmChannel = NotificationChannel(
-                CHANNEL_ALARM_ID,
-                "Timer Alarm Channel",
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "Full-screen alarm alerts for finished timers"
-                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-                setBypassDnd(true)
                 setSound(null, null)
             }
-            manager.createNotificationChannel(alarmChannel)
+            manager.createNotificationChannel(lowChannel)
         }
     }
 

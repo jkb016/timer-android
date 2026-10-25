@@ -15,6 +15,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.jkb016.timer.ui.TimerScreen
 import com.jkb016.timer.ui.TimerViewModel
 import com.jkb016.timer.ui.theme.TimerTheme
@@ -28,6 +29,11 @@ class MainActivity : ComponentActivity() {
     ) { _ -> }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        val splashScreen = installSplashScreen()
+        // Immediately remove splash screen icon and view with no lingering delay/fade
+        splashScreen.setOnExitAnimationListener { splashScreenViewProvider ->
+            splashScreenViewProvider.remove()
+        }
         super.onCreate(savedInstanceState)
         checkPermissions()
 
