@@ -52,6 +52,33 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         viewModel.reloadStateFromRepository()
+        checkOverlayPermission()
+    }
+
+    // "Display over other apps" exempts us from background activity-start limits, so the
+    // alarm screen can open directly while the device is unlocked and the app is backgrounded.
+    // Asked once per launch, after the full-screen-intent prompt has been handled.
+    private fun checkOverlayPermission() {
+        if (overlayPromptShown) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+            if (!notificationManager.canUseFullScreenIntent()) return
+        }
+        if (!android.provider.Settings.canDrawOverlays(this)) {
+            overlayPromptShown = true
+            try {
+                val intent = Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply {
+                    data = android.net.Uri.parse("package:$packageName")
+                }
+                startActivity(intent)
+            } catch (e: Exception) {
+                // Ignore
+            }
+        }
+    }
+
+    companion object {
+        private var overlayPromptShown = false
     }
 
     override fun onNewIntent(intent: Intent) {

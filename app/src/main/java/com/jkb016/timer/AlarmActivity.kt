@@ -119,6 +119,32 @@ class AlarmActivity : ComponentActivity() {
         hideSystemUI()
     }
 
+    override fun onStart() {
+        super.onStart()
+        notifyAlarmVisibility(TimerForegroundService.ACTION_ALARM_SHOWN)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Finishing means Stop / +time was pressed; the service is already handling that.
+        if (!isFinishing) {
+            notifyAlarmVisibility(TimerForegroundService.ACTION_ALARM_HIDDEN)
+        }
+    }
+
+    // Keeps the service's heads-up notification in sync: silent while the red screen is visible,
+    // alerting again once it's left (e.g. Home pressed while still ringing).
+    private fun notifyAlarmVisibility(visibilityAction: String) {
+        val serviceIntent = Intent(this, TimerForegroundService::class.java).apply {
+            action = visibilityAction
+        }
+        try {
+            startService(serviceIntent)
+        } catch (e: Exception) {
+            // In background or stopped
+        }
+    }
+
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         turnScreenOnAndShowWhenLocked()

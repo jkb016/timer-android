@@ -40,6 +40,8 @@ class TimerForegroundService : Service() {
     private var vibrator: Vibrator? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var stateChangeListener: (() -> Unit)? = null
+    private var alarmScreenShown = false
+    private var alarmLaunchCheckJob: Job? = null
 
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var tickerJob: Job? = null
@@ -75,10 +77,31 @@ class TimerForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_ALARM_SHOWN) {
+            // Red screen is visible: swap the heads-up alarm notification for a silent one.
+            alarmScreenShown = true
+            alarmLaunchCheckJob?.cancel()
+        }
+        if (intent?.action == ACTION_ALARM_HIDDEN) {
+            // Red screen left while still ringing: bring the heads-up back. Skip when the screen is
+            // off, otherwise the full-screen intent would wake the device right after power is pressed.
+            // Also skip while locked: launching over the keyguard briefly stops/restarts the activity
+            // as the screen turns on, and there's nothing else the user can switch to from there.
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as android.app.KeyguardManager
+            if (powerManager.isInteractive && !keyguardManager.isKeyguardLocked) {
+                alarmScreenShown = false
+            }
+        }
+
         // Android requires startForeground() to be actively called within seconds of startForegroundService().
         // Always ensure a foreground notification is immediately posted.
         ensureForegroundNotification()
 
+        if (intent?.action == ACTION_ALARM_SHOWN || intent?.action == ACTION_ALARM_HIDDEN) {
+            // ensureForegroundNotification() above already re-posted it; don't re-trigger the alarm.
+            return START_STICKY
+        }
         if (intent?.action == ACTION_ALARM_TRIGGER) {
             handleAlarmTriggerAction()
             return START_STICKY
@@ -90,6 +113,10 @@ class TimerForegroundService : Service() {
         if (intent?.action == ACTION_ADD_TIME) {
             val secondsToAdd = intent.getLongExtra(EXTRA_ADD_SECONDS, 60L)
             handleAddTimeAction(secondsToAdd)
+            return START_STICKY
+        }
+        if (intent?.action == ACTION_REMOVE_TIMER) {
+            intent.getStringExtra(EXTRA_TIMER_ID)?.let { handleRemoveTimerAction(it) }
             return START_STICKY
         }
         refreshServiceState()
@@ -105,7 +132,7 @@ class TimerForegroundService : Service() {
         when {
             finishedTimers.isNotEmpty() -> {
                 val label = finishedTimers.first().displayOriginalLabel
-                startForegroundNotification(label, "Time's up!", isCountingDown = false, isAlarm = true)
+                startForegroundNotification(label, "Time's up!", timerId = finishedTimers.first().id, isCountingDown = false, isAlarm = true)
             }
             runningTimers.isNotEmpty() -> {
                 val nextTimer = runningTimers.first()
@@ -114,7 +141,7 @@ class TimerForegroundService : Service() {
                 val now = System.currentTimeMillis()
                 val remMillis = (nextTimer.endTimeMillis - now).coerceAtLeast(0L)
                 val content = ActiveTimerState.formatSeconds((remMillis + 999L) / 1000L)
-                startForegroundNotification(title, content, endTimeMillis = nextTimer.endTimeMillis, isCountingDown = true, isAlarm = false)
+                startForegroundNotification(title, content, timerId = nextTimer.id, endTimeMillis = nextTimer.endTimeMillis, isCountingDown = true, isAlarm = false)
             }
             else -> {
                 val initialNotification = createNotification("Timer", "Running...", isCountingDown = false, isAlarm = false)
@@ -161,6 +188,23 @@ class TimerForegroundService : Service() {
             activeTimers.filterNot { it.status == TimerStatus.FINISHED }
         } else {
             activeTimers.map { if (it.status == TimerStatus.RUNNING) it.copy(status = TimerStatus.PAUSED) else it }
+        }
+
+        repository.saveActiveTimers(updated)
+        stateChangeListener?.invoke()
+        refreshServiceState()
+    }
+
+    private fun handleRemoveTimerAction(timerId: String) {
+        val repository = TimerRepository(applicationContext)
+        val activeTimers = repository.getActiveTimers()
+        val removed = activeTimers.firstOrNull { it.id == timerId } ?: return
+        val updated = activeTimers.filterNot { it.id == timerId }
+
+        // Silence the alarm (and close the red screen) once no finished timers remain.
+        // If others are still finished, refreshServiceState() keeps the alarm going for them.
+        if (removed.status == TimerStatus.FINISHED && updated.none { it.status == TimerStatus.FINISHED }) {
+            stopAlarm()
         }
 
         repository.saveActiveTimers(updated)
@@ -221,10 +265,10 @@ class TimerForegroundService : Service() {
                     scheduleAlarmManager(nextTimer.endTimeMillis)
                     startTickerLoop()
 
-                    startForegroundNotification(label, "Time's up!", endTimeMillis = nextTimer.endTimeMillis, isCountingDown = false, isAlarm = true)
+                    startForegroundNotification(label, "Time's up!", timerId = finishedTimers.first().id, endTimeMillis = nextTimer.endTimeMillis, isCountingDown = false, isAlarm = true)
                 } else {
                     stopTickerLoop()
-                    startForegroundNotification(label, "Time's up!", isCountingDown = false, isAlarm = true)
+                    startForegroundNotification(label, "Time's up!", timerId = finishedTimers.first().id, isCountingDown = false, isAlarm = true)
                 }
             }
             runningTimers.isNotEmpty() -> {
@@ -236,7 +280,7 @@ class TimerForegroundService : Service() {
                 val remMillis = (first.endTimeMillis - now).coerceAtLeast(0L)
                 val content = ActiveTimerState.formatSeconds((remMillis + 999L) / 1000L)
 
-                startForegroundNotification(title, content, endTimeMillis = first.endTimeMillis, isCountingDown = true, isAlarm = false)
+                startForegroundNotification(title, content, timerId = first.id, endTimeMillis = first.endTimeMillis, isCountingDown = true, isAlarm = false)
                 scheduleAlarmManager(first.endTimeMillis)
                 startTickerLoop()
             }
@@ -278,7 +322,7 @@ class TimerForegroundService : Service() {
                 val remMillis = (first.endTimeMillis - now).coerceAtLeast(0L)
                 val content = ActiveTimerState.formatSeconds((remMillis + 999L) / 1000L)
 
-                updateNotification(title, content, endTimeMillis = first.endTimeMillis, isCountingDown = true, isAlarm = false)
+                updateNotification(title, content, timerId = first.id, endTimeMillis = first.endTimeMillis, isCountingDown = true, isAlarm = false)
             }
         }
     }
@@ -423,9 +467,10 @@ class TimerForegroundService : Service() {
         content: String,
         endTimeMillis: Long = 0L,
         isCountingDown: Boolean = false,
-        isAlarm: Boolean = false
+        isAlarm: Boolean = false,
+        timerId: String? = null
     ) {
-        val notification = createNotification(title, content, endTimeMillis, isCountingDown, isAlarm)
+        val notification = createNotification(title, content, endTimeMillis, isCountingDown, isAlarm, timerId)
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 startForeground(
@@ -446,10 +491,11 @@ class TimerForegroundService : Service() {
         content: String,
         endTimeMillis: Long = 0L,
         isCountingDown: Boolean = false,
-        isAlarm: Boolean = false
+        isAlarm: Boolean = false,
+        timerId: String? = null
     ) {
         try {
-            val notification = createNotification(title, content, endTimeMillis, isCountingDown, isAlarm)
+            val notification = createNotification(title, content, endTimeMillis, isCountingDown, isAlarm, timerId)
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.notify(NOTIFICATION_ID, notification)
         } catch (e: Exception) {
@@ -513,6 +559,20 @@ class TimerForegroundService : Service() {
             }.toBundle()
         } else null
 
+        // With the overlay permission the direct launch below succeeds (locked or not), so skip the
+        // heads-up notification up front instead of flashing it until the activity reports in.
+        // If the red screen hasn't reported visible shortly after, fall back to the alerting
+        // notification (full-screen intent) so the alarm is never silent on screen.
+        if (!alarmScreenShown && android.provider.Settings.canDrawOverlays(this)) {
+            alarmScreenShown = true
+            alarmLaunchCheckJob?.cancel()
+            alarmLaunchCheckJob = serviceScope.launch {
+                delay(3000)
+                alarmScreenShown = false
+                ensureForegroundNotification()
+            }
+        }
+
         try {
             pendingIntent.send(this, 0, null, null, null, null, senderOptions)
         } catch (e: Exception) {
@@ -537,6 +597,9 @@ class TimerForegroundService : Service() {
     }
 
     fun stopAlarm() {
+        alarmScreenShown = false
+        alarmLaunchCheckJob?.cancel()
+        alarmLaunchCheckJob = null
         stopAlarmSound()
         vibrator?.cancel()
         releaseWakeLock()
@@ -565,9 +628,12 @@ class TimerForegroundService : Service() {
         content: String,
         endTimeMillis: Long = 0L,
         isCountingDown: Boolean = false,
-        isAlarm: Boolean = false
+        isAlarm: Boolean = false,
+        timerId: String? = null
     ): Notification {
-        val channelId = if (isAlarm) CHANNEL_ALARM_ID else CHANNEL_ID
+        // Only alert (heads-up / full-screen intent) while the red screen isn't already showing.
+        val alert = isAlarm && !alarmScreenShown
+        val channelId = if (alert) CHANNEL_ALARM_ID else CHANNEL_ID
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -595,21 +661,36 @@ class TimerForegroundService : Service() {
             fullScreenOptions
         )
 
-        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+        // Full-screen intents are only honoured on a high-importance channel, and only when the
+        // notification is allowed to alert (onlyAlertOnce would suppress it on an update).
+        val builder = NotificationCompat.Builder(this, channelId)
             .setContentTitle(title)
             .setContentText(content)
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
             .setContentIntent(if (isAlarm) fullScreenPendingIntent else pendingIntent)
             .setOngoing(true)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setOnlyAlertOnce(true)
+            .setOnlyAlertOnce(!alert)
             .setUsesChronometer(false)
             .setShowWhen(false)
             .setSound(null)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setPriority(if (alert) NotificationCompat.PRIORITY_MAX else NotificationCompat.PRIORITY_LOW)
             .setCategory(if (isAlarm) NotificationCompat.CATEGORY_ALARM else NotificationCompat.CATEGORY_SERVICE)
 
-        if (isAlarm) {
+        // Stop button removes the timer this notification is showing (finished or counting down).
+        if (timerId != null) {
+            val removeIntent = Intent(this, TimerForegroundService::class.java).apply {
+                action = ACTION_REMOVE_TIMER
+                putExtra(EXTRA_TIMER_ID, timerId)
+            }
+            val removePendingIntent = PendingIntent.getService(
+                this, 1006, removeIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            builder.addAction(android.R.drawable.ic_media_pause, "Stop", removePendingIntent)
+        }
+
+        if (alert) {
             builder.setFullScreenIntent(fullScreenPendingIntent, true)
         }
 
@@ -630,6 +711,20 @@ class TimerForegroundService : Service() {
                 setSound(null, null)
             }
             manager.createNotificationChannel(lowChannel)
+
+            // Sound and vibration are driven by the service itself, so the channel stays silent.
+            val alarmChannel = NotificationChannel(
+                CHANNEL_ALARM_ID,
+                "Timer Alarm Channel",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Full-screen alert when a timer finishes"
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                enableVibration(false)
+                setSound(null, null)
+                setBypassDnd(true)
+            }
+            manager.createNotificationChannel(alarmChannel)
         }
     }
 
@@ -644,8 +739,12 @@ class TimerForegroundService : Service() {
         const val ACTION_ALARM_TRIGGER = "com.jkb016.timer.ACTION_ALARM_TRIGGER"
         const val ACTION_STOP_TIMER = "com.jkb016.timer.ACTION_STOP_TIMER"
         const val ACTION_ALARM_STOPPED = "com.jkb016.timer.ACTION_ALARM_STOPPED"
+        const val ACTION_ALARM_SHOWN = "com.jkb016.timer.ACTION_ALARM_SHOWN"
+        const val ACTION_ALARM_HIDDEN = "com.jkb016.timer.ACTION_ALARM_HIDDEN"
         const val ACTION_ADD_TIME = "com.jkb016.timer.ACTION_ADD_TIME"
         const val EXTRA_ADD_SECONDS = "extra_add_seconds"
+        const val ACTION_REMOVE_TIMER = "com.jkb016.timer.ACTION_REMOVE_TIMER"
+        const val EXTRA_TIMER_ID = "extra_timer_id"
         private const val CHANNEL_ID = "timer_service_channel"
         private const val CHANNEL_ALARM_ID = "timer_alarm_channel_v5"
         private const val NOTIFICATION_ID = 1001
