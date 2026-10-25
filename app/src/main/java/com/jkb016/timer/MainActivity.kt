@@ -7,13 +7,24 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.jkb016.timer.ui.TimerScreen
@@ -34,16 +45,28 @@ class MainActivity : ComponentActivity() {
         splashScreen.setOnExitAnimationListener { splashScreenViewProvider ->
             splashScreenViewProvider.remove()
         }
+        // Light status bar icons over a black strip, so they stay readable on the light app background.
+        enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         super.onCreate(savedInstanceState)
         checkPermissions()
 
         setContent {
             TimerTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    TimerScreen(viewModel = viewModel)
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Spacer(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .windowInsetsTopHeight(WindowInsets.statusBars)
+                            .background(Color.Black)
+                    )
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .consumeWindowInsets(WindowInsets.statusBars),
+                        color = MaterialTheme.colorScheme.background
+                    ) {
+                        TimerScreen(viewModel = viewModel)
+                    }
                 }
             }
         }

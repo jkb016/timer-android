@@ -75,6 +75,13 @@ import kotlinx.coroutines.launch
 
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.delay
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TimerScreen(
@@ -135,7 +142,9 @@ fun TimerScreen(
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background
-                )
+                ),
+                // Status bar area is drawn black by MainActivity, so don't pad for it again here.
+                windowInsets = WindowInsets(0, 0, 0, 0)
             )
         },
         floatingActionButton = {
@@ -522,8 +531,14 @@ fun ActiveTimerCard(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
+                    // Finished timers count up the time elapsed since they ended.
+                    val now = if (isFinished) rememberCurrentTimeMillis() else 0L
                     Text(
-                        text = TimerViewModel.formatRemainingTime(timerState.remainingMillis),
+                        text = if (isFinished) {
+                            "+" + TimerViewModel.formatElapsedTime(now - timerState.endTimeMillis)
+                        } else {
+                            TimerViewModel.formatRemainingTime(timerState.remainingMillis)
+                        },
                         style = MaterialTheme.typography.displayMedium.copy(
                             fontSize = 40.sp,
                             fontWeight = FontWeight.Bold,
@@ -633,9 +648,37 @@ fun ActiveTimerCard(
                     }
                 }
             }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = if (isFinished) {
+                    "Started ${formatClockTime(timerState.createdAt)} · Ended ${formatClockTime(timerState.endTimeMillis)}"
+                } else {
+                    "Started ${formatClockTime(timerState.createdAt)}"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (isFinished) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
+
+/** Current wall-clock time, refreshed every second while in composition. */
+@Composable
+fun rememberCurrentTimeMillis(): Long {
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = System.currentTimeMillis()
+            delay(1000L - now % 1000L)
+        }
+    }
+    return now
+}
+
+@Composable
+fun formatClockTime(millis: Long): String =
+    TimerViewModel.formatClockTime(LocalContext.current, millis)
 
 @Composable
 fun KeypadBottomSheetContent(
@@ -729,6 +772,14 @@ fun KeypadBottomSheetContent(
                         imageVector = Icons.AutoMirrored.Filled.Backspace,
                         contentDescription = "Backspace",
                         tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+                IconButton(onClick = onClearInput) {
+                    Icon(
+                        imageVector = Icons.Default.Clear,
+                        contentDescription = "Clear to 0",
+                        tint = MaterialTheme.colorScheme.error,
                         modifier = Modifier.size(22.dp)
                     )
                 }

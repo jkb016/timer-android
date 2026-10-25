@@ -25,6 +25,7 @@ import com.jkb016.timer.MainActivity
 import com.jkb016.timer.data.ActiveTimerState
 import com.jkb016.timer.data.TimerRepository
 import com.jkb016.timer.data.TimerStatus
+import com.jkb016.timer.ui.TimerViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -691,6 +692,11 @@ class TimerForegroundService : Service() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
             builder.addAction(android.R.drawable.ic_media_pause, "Stop", removePendingIntent)
+
+            // Sub text is shown in the notification header, next to the app name.
+            TimerRepository(applicationContext).getActiveTimers().firstOrNull { it.id == timerId }?.let { timer ->
+                builder.setSubText("Started ${TimerViewModel.formatClockTime(this, timer.createdAt)}")
+            }
         }
 
         if (alert) {

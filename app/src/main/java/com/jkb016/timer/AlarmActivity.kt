@@ -51,9 +51,15 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import android.content.BroadcastReceiver
 import android.content.IntentFilter
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import com.jkb016.timer.data.ActiveTimerState
 import com.jkb016.timer.data.TimerRepository
 import com.jkb016.timer.data.TimerStatus
 import com.jkb016.timer.service.TimerForegroundService
+import com.jkb016.timer.ui.TimerViewModel
+import com.jkb016.timer.ui.formatClockTime
+import com.jkb016.timer.ui.rememberCurrentTimeMillis
 import com.jkb016.timer.ui.theme.TimerTheme
 
 class AlarmActivity : ComponentActivity() {
@@ -66,6 +72,13 @@ class AlarmActivity : ComponentActivity() {
         }
     }
 
+    // The timer the red screen is for (first finished one, matching the notification), for its start/end times.
+    private var finishedTimer by mutableStateOf<ActiveTimerState?>(null)
+
+    private fun loadFinishedTimer() {
+        finishedTimer = TimerRepository(this).getActiveTimers().firstOrNull { it.status == TimerStatus.FINISHED }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         turnScreenOnAndShowWhenLocked()
         super.onCreate(savedInstanceState)
@@ -73,11 +86,13 @@ class AlarmActivity : ComponentActivity() {
         registerStopReceiver()
 
         val timerName = intent.getStringExtra(EXTRA_TIMER_NAME) ?: "Timer"
+        loadFinishedTimer()
 
         setContent {
             TimerTheme {
                 AlarmScreen(
                     timerName = timerName,
+                    finishedTimer = finishedTimer,
                     onStop = {
                         val serviceIntent = Intent(this@AlarmActivity, TimerForegroundService::class.java).apply {
                             action = TimerForegroundService.ACTION_STOP_TIMER
@@ -109,6 +124,7 @@ class AlarmActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        loadFinishedTimer()
         turnScreenOnAndShowWhenLocked()
         hideSystemUI()
     }
@@ -205,6 +221,7 @@ class AlarmActivity : ComponentActivity() {
 @Composable
 fun AlarmScreen(
     timerName: String,
+    finishedTimer: ActiveTimerState?,
     onStop: () -> Unit,
     onAddExtraTime: (Long) -> Unit
 ) {
@@ -275,23 +292,44 @@ fun AlarmScreen(
                         textAlign = TextAlign.Center
                     )
                 )
+
+                if (finishedTimer != null) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Started ${formatClockTime(finishedTimer.createdAt)} · Ended ${formatClockTime(finishedTimer.endTimeMillis)}",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            color = Color.White,
+                            textAlign = TextAlign.Center
+                        )
+                    )
+                }
             }
 
-            // Middle Section - Giant 00:00 Display
+            // Middle Section - time elapsed since the timer ended, counting up
+            val now = rememberCurrentTimeMillis()
+            val endedAt = finishedTimer?.endTimeMillis ?: now
             Surface(
                 shape = RoundedCornerShape(32.dp),
                 color = Color.Black.copy(alpha = 0.3f),
                 modifier = Modifier.padding(vertical = 16.dp)
             ) {
-                Text(
-                    text = "00:00",
-                    style = MaterialTheme.typography.displayLarge.copy(
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 72.sp
-                    ),
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.padding(horizontal = 32.dp, vertical = 16.dp)
-                )
+                ) {
+                    Text(
+                        text = "+" + TimerViewModel.formatElapsedTime(now - endedAt),
+                        style = MaterialTheme.typography.displayLarge.copy(
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 72.sp
+                        )
+                    )
+                    Text(
+                        text = "since timer ended",
+                        style = MaterialTheme.typography.titleSmall.copy(color = Color.White.copy(alpha = 0.8f))
+                    )
+                }
             }
 
             // Bottom Section - Add Time options & Huge STOP Button

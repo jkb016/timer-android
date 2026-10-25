@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.os.IBinder
+import android.text.format.DateFormat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.jkb016.timer.data.ActiveTimerState
@@ -19,6 +20,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class TimerViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -381,6 +385,25 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
             return when {
                 h > 0 -> String.format("%d:%02d:%02d", h, m, s)
                 else -> String.format("%d:%02d", m, s)
+            }
+        }
+
+        /** Formats a timestamp as a time of day with seconds, following the device's 12/24-hour setting. */
+        fun formatClockTime(context: Context, millis: Long): String {
+            val skeleton = if (DateFormat.is24HourFormat(context)) "Hms" else "hms"
+            val pattern = DateFormat.getBestDateTimePattern(Locale.getDefault(), skeleton)
+            return SimpleDateFormat(pattern, Locale.getDefault()).format(Date(millis))
+        }
+
+        /** Like [formatRemainingTime] but rounds down, for time counting up (e.g. since a timer ended). */
+        fun formatElapsedTime(millis: Long): String {
+            val totalSec = millis.coerceAtLeast(0L) / 1000
+            val h = totalSec / 3600
+            val m = (totalSec % 3600) / 60
+            val s = totalSec % 60
+            return when {
+                h > 0 -> String.format("%02d:%02d:%02d", h, m, s)
+                else -> String.format("%02d:%02d", m, s)
             }
         }
 
