@@ -167,9 +167,12 @@ class TimerForegroundService : Service() {
         val activeTimers = repository.getActiveTimers()
         val runningTimers = activeTimers.filter { it.status == TimerStatus.RUNNING }.sortedBy { it.endTimeMillis }
         val now = System.currentTimeMillis()
+        // TimerAlarmReceiver has usually finished the due timer already before starting us; only
+        // fall back to the next running timer when nothing is finished, or we'd finish a second one.
+        val fallbackId = if (activeTimers.none { it.status == TimerStatus.FINISHED }) runningTimers.firstOrNull()?.id else null
 
         val updated = activeTimers.map { timer ->
-            if (timer.status == TimerStatus.RUNNING && (timer.endTimeMillis <= now + 2000L || timer.id == runningTimers.firstOrNull()?.id)) {
+            if (timer.status == TimerStatus.RUNNING && (timer.endTimeMillis <= now + 2000L || timer.id == fallbackId)) {
                 timer.copy(remainingMillis = 0L, status = TimerStatus.FINISHED)
             } else timer
         }

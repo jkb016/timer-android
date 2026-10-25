@@ -25,9 +25,12 @@ class TimerAlarmReceiver : BroadcastReceiver() {
         val activeTimers = repository.getActiveTimers()
         val runningTimers = activeTimers.filter { it.status == TimerStatus.RUNNING }.sortedBy { it.endTimeMillis }
         val now = System.currentTimeMillis()
+        // Fallback for a slightly early alarm: finish the next running timer, but only if nothing
+        // has finished yet, otherwise a second pass would wrongly finish the following timer too.
+        val fallbackId = if (activeTimers.none { it.status == TimerStatus.FINISHED }) runningTimers.firstOrNull()?.id else null
 
         val updated = activeTimers.map { timer ->
-            if (timer.status == TimerStatus.RUNNING && (timer.endTimeMillis <= now + 2000L || timer.id == runningTimers.firstOrNull()?.id)) {
+            if (timer.status == TimerStatus.RUNNING && (timer.endTimeMillis <= now + 2000L || timer.id == fallbackId)) {
                 timer.copy(remainingMillis = 0L, status = TimerStatus.FINISHED)
             } else timer
         }
