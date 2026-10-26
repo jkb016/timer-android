@@ -388,9 +388,13 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        /** Formats a timestamp as a time of day with seconds, following the device's 12/24-hour setting. */
-        fun formatClockTime(context: Context, millis: Long): String {
-            val skeleton = if (DateFormat.is24HourFormat(context)) "Hms" else "hms"
+        /** Formats a timestamp as a time of day, following the device's 12/24-hour setting. */
+        fun formatClockTime(context: Context, millis: Long, withSeconds: Boolean = true): String {
+            val is24Hour = DateFormat.is24HourFormat(context)
+            val skeleton = when {
+                withSeconds -> if (is24Hour) "Hms" else "hms"
+                else -> if (is24Hour) "Hm" else "hm"
+            }
             val pattern = DateFormat.getBestDateTimePattern(Locale.getDefault(), skeleton)
             return SimpleDateFormat(pattern, Locale.getDefault()).format(Date(millis))
         }

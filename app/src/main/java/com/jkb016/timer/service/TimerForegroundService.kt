@@ -695,7 +695,7 @@ class TimerForegroundService : Service() {
 
             // Sub text is shown in the notification header, next to the app name.
             TimerRepository(applicationContext).getActiveTimers().firstOrNull { it.id == timerId }?.let { timer ->
-                builder.setSubText("Started ${TimerViewModel.formatClockTime(this, timer.createdAt)}")
+                builder.setSubText("Started ${TimerViewModel.formatClockTime(this, timer.createdAt, withSeconds = false)}")
             }
         }
 
