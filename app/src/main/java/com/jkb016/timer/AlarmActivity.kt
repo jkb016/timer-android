@@ -294,14 +294,15 @@ fun AlarmScreen(
                 )
 
                 if (finishedTimer != null) {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = "Started ${formatClockTime(finishedTimer.createdAt)} · Ended ${formatClockTime(finishedTimer.endTimeMillis)}",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            color = Color.White,
-                            textAlign = TextAlign.Center
-                        )
+                    // titleMedium is 16sp; bumped by 2 for readability at a glance.
+                    val timeStyle = MaterialTheme.typography.titleMedium.copy(
+                        color = Color.White,
+                        fontSize = 18.sp,
+                        textAlign = TextAlign.Center
                     )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(text = "Started ${formatClockTime(finishedTimer.createdAt)}", style = timeStyle)
+                    Text(text = "Ended ${formatClockTime(finishedTimer.endTimeMillis)}", style = timeStyle)
                 }
             }
 
