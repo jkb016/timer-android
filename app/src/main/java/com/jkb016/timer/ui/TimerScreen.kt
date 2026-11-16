@@ -388,6 +388,13 @@ fun HistoryListItemCard(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                     )
+                    if (System.currentTimeMillis() - item.timestamp < 12 * 60 * 60 * 1000L) {
+                        Text(
+                            text = "Last started ${formatClockTime(item.timestamp, withSeconds = false)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     if (item.label.isNotEmpty() && item.label != "${item.totalSeconds / 60} min") {
                         Text(
                             text = item.label,
@@ -677,8 +684,8 @@ fun rememberCurrentTimeMillis(): Long {
 }
 
 @Composable
-fun formatClockTime(millis: Long): String =
-    TimerViewModel.formatClockTime(LocalContext.current, millis)
+fun formatClockTime(millis: Long, withSeconds: Boolean = true): String =
+    TimerViewModel.formatClockTime(LocalContext.current, millis, withSeconds)
 
 @Composable
 fun KeypadBottomSheetContent(
